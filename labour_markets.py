@@ -1,6 +1,16 @@
+"""
+A simulation of a theoretical labour market as taught at The University of
+Melbourne economics department in Intermediate Macroeconomics.
+
+Implemented by Sharan K.
+"""
+
 from typing import List, Tuple, Union
+from math import e
 import matplotlib.pyplot as plt
 import numpy as np
+
+TOLERANCE = 1.0e-5
 
 class InvalidValueError(Exception):
     def __init__(self, msg):
@@ -39,7 +49,6 @@ class Shockable:
         :param new_val: value to be assumed by this object after shock
         :param time: shock execution time
         """
-
         # Remove other shocks scheduled for variable at 'time'
         for i in range(len(self.shocks)):
             if self.shocks[i].time == time:
@@ -57,7 +66,6 @@ class Shockable:
         :param time: current market time
         :return: a tuple consisting of the variables previous and new value
         """
-
         for shock in self.shocks:
             if shock.time == time:
                 prev_val = self.val
@@ -87,7 +95,7 @@ class Shockable:
                 raise InvalidValueError(output)
 
     def equals(self, shockable):
-        if self.val == shockable.val:
+        if abs(self.val - shockable.val) <= TOLERANCE:
             return True
         return False
 
@@ -113,6 +121,7 @@ class Matcher:
         """
         Updates tightness given firm's vacancy fill value and job posting cost.
         :param firm: the market's firm side
+        self.tightness = self.optimal_tightness(firm.j.val, firm.c.val)
         """
         self.tightness = self.optimal_tightness(firm.j.val, firm.c.val)
 
@@ -142,7 +151,7 @@ class Matcher:
     def equals(self, matcher):
         if self.A.equals(matcher.A) and\
            self.a.equals(matcher.a) and\
-           self.tightness == matcher.tightness:
+           abs(self.tightness - matcher.tightness) <= TOLERANCE:
             return True
 
         return False
@@ -157,6 +166,7 @@ class FirmSide:
     """
     def __init__(self, j, c, matcher, labour):
         self.j, self.c = j, c
+        self.q = matcher.get_frate() / matcher.tightness
         self.v = [matcher.tightness * labour.u[-1]]
 
     def update(self, labour, matcher):
@@ -165,6 +175,7 @@ class FirmSide:
         :param labour: LabourSide object of the labour market
         :param matcher: Matcher object of the labour market
         """
+        self.q = matcher.get_frate() / matcher.tightness
         vacancies = matcher.tightness * labour.u[-1]
         self.v.append(vacancies)
 
@@ -183,10 +194,13 @@ class FirmSide:
 
         return [("j", j_shock), ("c", c_shock)]
 
+    def vacancy_duration(self):
+        return 1 / self.q
+
     def equals(self, firms):
         if self.j.equals(firms.j) and\
            self.c.equals(firms.c) and\
-           self.v[-1] == firms.v[-1]:
+           abs(self.v[-1] - firms.v[-1]) <= TOLERANCE:
             return True
 
         return False
@@ -248,10 +262,13 @@ class LabourSide:
         if self.s.val + self.f >= 1:
             raise BrokenMarketError(msg)
 
+    def unemployment_duration(self):
+        return 1/self.f
+
     def equals(self, labour):
         if self.s.equals(labour.s) and\
-           self.f == labour.f and\
-           self.u[-1] == labour.u[-1]:
+           abs(self.f - labour.f) <= TOLERANCE and\
+           abs(self.u[-1] - labour.u[-1]) <= TOLERANCE:
             return True
 
         return False
@@ -286,7 +303,6 @@ class LabourMarket:
         self.shock_log = {}
 
     def update(self):
-
         """
         Updates the labour market by one period, capturing all
         flow and shock affects
@@ -294,21 +310,26 @@ class LabourMarket:
         # A labour-side lag. Shocks occur after labour updates
         self.labour.update(self.matcher)
 
-        #Checks for shocks and updates shock_log accordingly
+        # Checks for shocks and updates shock_log accordingly
         self.shock_update()
         self.time += 1
 
-        #Matching institutions and firms are informed of shocks
+        # Matching institutions and firms are informed of shocks
         self.matcher.update(self.firms)
         self.firms.update(self.labour, self.matcher)
 
     def shock_update(self):
+        """
+        Checks shock for each market object and appends the returned tuple
+        to shock_log
+        """
         curr_shocks = [
                         self.labour.check_shock(self.time),
                         self.matcher.check_shock(self.time),
                         self.firms.check_shock(self.time)
                       ]
 
+        # Each check_shock returns a list of tuples, hence the nested loop
         self.shock_log[self.time] = []
         for shock_list in curr_shocks:
             for shock in shock_list:
@@ -340,27 +361,34 @@ class LabourMarket:
         self.matcher.a.schedule_shock(new_val, time)
 
     def get_udata(self):
-        #Returns list of unemployment rates over time till present
+        # Returns list of unemployment rates over time till present
         return self.labour.u.copy()
 
     def get_vdata(self):
-        #Returns list of unemployment rates over time till present
+        # Returns list of unemployment rates over time till present
         return self.firms.v.copy()
 
     def get_tightness(self):
-        #Returns current market tightness
+        # Returns current market tightness
         return self.matcher.tightness
 
-    def time_series(self):
+    def time_series(self, label1: str = "Unemployment",
+                          label2: str = "Vacancies",
+                          x_label: str = "Time",
+                          y_label: str = "Rate"):
         """
         Plots unemployment and vacancy rates over time till present
         """
         fig, ax = plt.subplots()
         time = np.arange(-1, self.time + 1)
-        data = self.get_udata()
-        ax.plot(time, data)
-        data = self.get_vdata()
-        ax.plot(time, data)
+        udata = self.get_udata()
+        vdata = self.get_vdata()
+        ax.plot(time, udata, label = label1)
+        ax.plot(time, vdata, label = label2)
+
+        ax.set_xlabel(x_label)
+        ax.set_ylabel(y_label)
+        plt.legend()
         plt.show()
 
     def equals(self, market):
@@ -373,21 +401,19 @@ class LabourMarket:
 
 #Tasks
 
-# Replace all floating point comparisons (float1 == float2), with an
-# approximate floating point comparitor (np.isclose(float1, float2, rtol...))
-
 #Think about how to distribute functions: i.e. should the user of code
 # have to call econ.labour to access the steady state or just econ
 
 #Edit graphing functions so that users get to choose what data is displayed
 #e.g. vacancy rate or unemployment rate, as well as what to label axes
 
-#I want to finish this project soon, so no tests. Maybe some day...
+#Add tests
+
 
 if __name__ == "__main__":
     econ = LabourMarket()
     econ.shock_j(1000, 1)
-    econ.shock_c(800,1)
+    econ.shock_c(700,1)
     econ.shock_a(0.4, 20)
     econ.shock_A(0.7, 40)
     econ.shock_s(0.1, 60)
