@@ -5,5 +5,4 @@ This repository is dedicated to hosting simulations of economic theory as taught
 I undertook this project as a means to familiarise myself with Python, OOP and working with larger scale projects. Consequently, I'm open to advice on how to improve existing code, as well as ideas on any enhancements that can be made.
 
 Thanks,
-
 Sharan Krishnan
